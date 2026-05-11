@@ -557,7 +557,7 @@ const StudentDataViz = () => {
                   </label>
 
                   <a
-                    href="/student-data-template.xlsx"
+                    href={`${import.meta.env.BASE_URL}student-data-template.xlsx`}
                     download="Growth-Plans-Template.xlsx"
                     className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold border border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors"
                   >
@@ -606,7 +606,7 @@ const StudentDataViz = () => {
       <div className="bg-white border-b border-gray-100 sticky top-0 z-20">
         <div className="max-w-2xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Sarah Redfern High School" className="h-12 w-auto" />
+            <img src={`${import.meta.env.BASE_URL}logo.png`} alt="Sarah Redfern High School" className="h-12 w-auto" />
             <div>
               <h1 className="text-base font-bold text-gray-900 leading-tight">Growth Plans</h1>
               <p className="text-xs text-gray-400">Literacy · Numeracy · Attendance</p>
