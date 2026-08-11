@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Upload, FileSpreadsheet, Search, ArrowLeft, ChevronRight,
-  Users, Info, Shield, CheckCircle, Trash2, X, Pencil, MessageSquare,
+  Users, Info, Shield, CheckCircle, Trash2, X, Pencil, Target,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { db } from './firebase';
@@ -9,6 +9,14 @@ import { doc, getDoc, setDoc, deleteDoc, collection } from 'firebase/firestore';
 
 const FS_DOC = doc(db, 'dashboard', 'current');
 const commentRef = (name) => doc(collection(db, 'studentComments'), name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''));
+
+// The three goal types, in display order. `key` is used in both the spreadsheet
+// row mapping and the Firestore document.
+const GOAL_TYPES = [
+  { key: 'literacyGoal', label: 'Literacy', placeholder: 'e.g. Use paragraph planners to structure extended responses by end of Term 3' },
+  { key: 'numeracyGoal', label: 'Numeracy', placeholder: 'e.g. Fluency with fractions and decimals without a calculator' },
+  { key: 'careerGoal',   label: 'Career & Pathway', placeholder: 'e.g. Exploring TAFE nursing entry — school-based traineeship in Year 11' },
+];
 
 const SUPPORTS = {
   literacy: {
@@ -193,6 +201,15 @@ const getBandAndLevel = (value) => {
 
 const getGrowthTarget = (value) => Math.min(10, value + 1);
 
+// Match a spreadsheet column by any of the given names, ignoring case, spaces
+// and punctuation — staff headings vary ("Career Goal", "career/pathway goal").
+const normaliseHeader = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+const pickGoal = (row, ...names) => {
+  const wanted = names.map(normaliseHeader);
+  const key = Object.keys(row).find((k) => wanted.includes(normaliseHeader(k)));
+  return key ? String(row[key]).trim() : '';
+};
+
 const getInitials = (name) =>
   name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
 
@@ -315,82 +332,116 @@ const MetricBar = ({ metricName, metricLabel, value }) => {
 
 // ── Student notes (editable, persisted to Firestore separately) ───────────────
 
-const StudentNotes = ({ student }) => {
-  const [text, setText] = useState('');
+const emptyGoals = () => Object.fromEntries(GOAL_TYPES.map((g) => [g.key, '']));
+
+// Goals from the spreadsheet upload, used until a teacher edits them here.
+const goalsFromStudent = (student) =>
+  Object.fromEntries(GOAL_TYPES.map((g) => [g.key, student[g.key] || '']));
+
+const StudentGoals = ({ student }) => {
+  const [goals, setGoals] = useState(emptyGoals);
+  const [draft, setDraft] = useState(emptyGoals);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
+  // Remounted per student via `key`, so state starts clean on every selection.
   useEffect(() => {
-    // Firestore comment takes priority over spreadsheet comment
+    // Firestore goals take priority over the spreadsheet, field by field, so a
+    // teacher's edit survives the next upload but blank edits don't hide it.
     getDoc(commentRef(student.name)).then((snap) => {
-      if (snap.exists()) {
-        setText(snap.data().text);
-      } else {
-        setText(student.comment || '');
-      }
+      const saved = snap.exists() ? snap.data() : {};
+      setGoals(Object.fromEntries(
+        GOAL_TYPES.map((g) => [g.key, saved[g.key] || student[g.key] || ''])
+      ));
     }).catch(() => {
-      setText(student.comment || '');
+      setGoals(goalsFromStudent(student));
     }).finally(() => setLoaded(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [student.name]);
+
+  const startEditing = () => {
+    setDraft(goals);
+    setEditing(true);
+  };
 
   const save = async () => {
     setSaving(true);
-    await setDoc(commentRef(student.name), { text, updatedAt: new Date().toISOString() });
-    setSaving(false);
-    setEditing(false);
+    try {
+      // merge so any unrelated fields on the document are left intact
+      await setDoc(
+        commentRef(student.name),
+        { ...draft, updatedAt: new Date().toISOString() },
+        { merge: true },
+      );
+      setGoals(draft);
+      setEditing(false);
+    } catch {
+      alert('Could not save goals. Check your connection and try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (!loaded) return null;
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mt-5">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <MessageSquare size={15} className="text-blue-500" />
-          <span className="font-semibold text-gray-800 text-sm">Notes</span>
+          <Target size={15} className="text-blue-500" />
+          <span className="font-semibold text-gray-800 text-sm">Goals</span>
         </div>
         {!editing && (
           <button
-            onClick={() => setEditing(true)}
+            onClick={startEditing}
             className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-blue-600 transition-colors"
           >
             <Pencil size={12} />
-            {text ? 'Edit' : 'Add note'}
+            {GOAL_TYPES.some((g) => goals[g.key]) ? 'Edit' : 'Add goals'}
           </button>
         )}
       </div>
 
-      {editing ? (
-        <div>
-          <textarea
-            autoFocus
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={4}
-            placeholder="Add a note about this student…"
-            className="w-full border border-gray-200 rounded-lg p-3 text-sm text-gray-700 placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-          />
-          <div className="flex gap-2 mt-2">
-            <button
-              onClick={save}
-              disabled={saving}
-              className="text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded-lg transition-colors disabled:opacity-50"
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-            <button
-              onClick={() => setEditing(false)}
-              className="text-sm text-gray-400 hover:text-gray-600 border border-gray-200 px-4 py-1.5 rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
+      <div className="space-y-4">
+        {GOAL_TYPES.map((g) => (
+          <div key={g.key}>
+            <div className="text-[11px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">
+              {g.label}
+            </div>
+            {editing ? (
+              <textarea
+                value={draft[g.key]}
+                onChange={(e) => setDraft({ ...draft, [g.key]: e.target.value })}
+                rows={2}
+                placeholder={g.placeholder}
+                className="w-full border border-gray-200 rounded-lg p-3 text-sm text-gray-700 placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              />
+            ) : (
+              <p className={`text-sm leading-relaxed ${goals[g.key] ? 'text-gray-700' : 'text-gray-300 italic'}`}>
+                {goals[g.key] || 'No goal set.'}
+              </p>
+            )}
           </div>
+        ))}
+      </div>
+
+      {editing && (
+        <div className="flex gap-2 mt-4">
+          <button
+            onClick={save}
+            disabled={saving}
+            className="text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save goals'}
+          </button>
+          <button
+            onClick={() => setEditing(false)}
+            className="text-sm text-gray-400 hover:text-gray-600 border border-gray-200 px-4 py-1.5 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
         </div>
-      ) : (
-        <p className={`text-sm leading-relaxed ${text ? 'text-gray-700' : 'text-gray-300 italic'}`}>
-          {text || 'No notes yet.'}
-        </p>
       )}
     </div>
   );
@@ -442,7 +493,9 @@ const StudentDataViz = () => {
           literacy: parseFloat(row.Literacy || row.literacy || 0),
           numeracy: parseFloat(row.Numeracy || row.numeracy || 0),
           attendance: parseFloat(row.Attendance || row.attendance || 0),
-          comment: String(row.Comments || row.comments || row.Comment || row.comment || '').trim(),
+          literacyGoal: pickGoal(row, 'Literacy Goal', 'LiteracyGoal'),
+          numeracyGoal: pickGoal(row, 'Numeracy Goal', 'NumeracyGoal'),
+          careerGoal: pickGoal(row, 'Career Goal', 'CareerGoal', 'Pathway Goal', 'PathwayGoal', 'Career/Pathway Goal'),
         }));
 
         const at = new Date().toISOString();
@@ -454,7 +507,7 @@ const StudentDataViz = () => {
         setAdminOpen(false);
         setView('search');
       } catch {
-        alert('Error reading file. Please ensure it has columns: Name, Literacy, Numeracy, Attendance');
+        alert('Error reading file. Please ensure it has columns: Name, Literacy, Numeracy, Attendance, Literacy Goal, Numeracy Goal, Career Goal');
       } finally {
         setUploading(false);
       }
@@ -543,8 +596,10 @@ const StudentDataViz = () => {
                   <strong className="text-gray-700">Name</strong>,{' '}
                   <strong className="text-gray-700">Literacy</strong>,{' '}
                   <strong className="text-gray-700">Numeracy</strong>,{' '}
-                  <strong className="text-gray-700">Attendance</strong>.
-                  All scores 0–10.
+                  <strong className="text-gray-700">Attendance</strong> (scores 0–10), plus{' '}
+                  <strong className="text-gray-700">Literacy Goal</strong>,{' '}
+                  <strong className="text-gray-700">Numeracy Goal</strong> and{' '}
+                  <strong className="text-gray-700">Career Goal</strong>.
                 </p>
                 <div className="flex items-center gap-3 flex-wrap">
                   <label className="inline-block cursor-pointer">
@@ -751,7 +806,7 @@ const StudentDataViz = () => {
               <MetricBar metricName="attendance" metricLabel="Attendance" value={selectedStudent.attendance} />
             </div>
 
-            <StudentNotes student={selectedStudent} />
+            <StudentGoals key={selectedStudent.name} student={selectedStudent} />
 
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mt-5">
               <div className="flex items-start gap-2 mb-5">
