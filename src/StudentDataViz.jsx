@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Upload, FileSpreadsheet, Search, ArrowLeft, ChevronRight,
-  Users, Info, Shield, CheckCircle, Trash2, X, Pencil, Target,
+  Users, Info, Shield, CheckCircle, Trash2, X, Pencil, Target, Code2, Copy,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { db } from './firebase';
@@ -332,6 +332,75 @@ const MetricBar = ({ metricName, metricLabel, value }) => {
 
 // ── Student notes (editable, persisted to Firestore separately) ───────────────
 
+// Embedded copies (?embed=1) hide the Admin button, so a page that embeds the
+// dashboard can't be used to upload over or clear the data.
+const IS_EMBED = new URLSearchParams(window.location.search).get('embed') === '1';
+
+const embedUrl = () =>
+  `${window.location.origin}${import.meta.env.BASE_URL}${import.meta.env.BASE_URL.endsWith('/') ? '' : '/'}?embed=1`;
+
+const embedSnippet = () =>
+  `<iframe src="${embedUrl()}" title="Growth Plans" width="100%" height="900" loading="lazy" style="border:0;border-radius:12px"></iframe>`;
+
+const EmbedCode = () => {
+  const [copied, setCopied] = useState(false);
+  const code = embedSnippet();
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      // clipboard API needs a secure context — fall back to selecting the text
+      const el = document.getElementById('embed-code');
+      if (el) { el.focus(); el.select(); document.execCommand('copy'); }
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="bg-gray-50 border border-gray-200 rounded-xl p-6">
+      <div className="flex items-center gap-2 mb-1">
+        <Code2 size={15} className="text-blue-500" />
+        <h3 className="font-semibold text-gray-800 text-sm">Embed on another page</h3>
+      </div>
+      <p className="text-xs text-gray-500 mb-4 leading-relaxed">
+        Paste this into a staff intranet or website page to show the dashboard there.
+        The embedded copy hides the Admin button, so no one can upload or clear data from it.
+      </p>
+      <textarea
+        id="embed-code"
+        readOnly
+        value={code}
+        rows={3}
+        onFocus={(e) => e.target.select()}
+        className="w-full border border-gray-200 rounded-lg p-3 font-mono text-[11px] leading-relaxed text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+      />
+      <div className="flex items-center gap-3 mt-3">
+        <button
+          onClick={copy}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors
+            ${copied ? 'bg-green-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
+        >
+          {copied ? <CheckCircle size={15} /> : <Copy size={15} />}
+          {copied ? 'Copied' : 'Copy embed code'}
+        </button>
+        <a
+          href={embedUrl()}
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-gray-400 hover:text-blue-600 transition-colors"
+        >
+          Preview embedded view
+        </a>
+      </div>
+      <p className="text-xs text-amber-600 mt-3 leading-relaxed">
+        Only embed this on a page that is restricted to staff — it shows named student data.
+      </p>
+    </div>
+  );
+};
+
 const emptyGoals = () => Object.fromEntries(GOAL_TYPES.map((g) => [g.key, '']));
 
 // Goals from the spreadsheet upload, used until a teacher edits them here.
@@ -625,6 +694,9 @@ const StudentDataViz = () => {
                 )}
               </div>
 
+              {/* Embed */}
+              <EmbedCode />
+
               {/* Clear */}
               {data && (
                 <div className="border border-red-100 rounded-xl p-4">
@@ -667,13 +739,15 @@ const StudentDataViz = () => {
               <p className="text-xs text-gray-400">Literacy · Numeracy · Attendance</p>
             </div>
           </div>
-          <button
-            onClick={() => { setConfirmClear(false); setAdminOpen(true); }}
-            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-blue-600 border border-gray-200 hover:border-blue-200 px-3 py-1.5 rounded-full transition-all"
-          >
-            <Shield size={12} />
-            Admin
-          </button>
+          {!IS_EMBED && (
+            <button
+              onClick={() => { setConfirmClear(false); setAdminOpen(true); }}
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-blue-600 border border-gray-200 hover:border-blue-200 px-3 py-1.5 rounded-full transition-all"
+            >
+              <Shield size={12} />
+              Admin
+            </button>
+          )}
         </div>
       </div>
 
